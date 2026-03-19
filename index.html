@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Countdown</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800;900&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:         #0d0f1a;
+    --surface:    #151829;
+    --border:     rgba(99,102,241,.18);
+    --indigo-700: #3730a3;
+    --indigo-500: #6366f1;
+    --indigo-400: #818cf8;
+    --indigo-300: #a5b4fc;
+    --gold:       #f5a623;
+    --red:        #ef4444;
+    --green:      #10b981;
+    --slate-400:  #94a3b8;
+    --slate-600:  #475569;
+    --white:      #ffffff;
+  }
+
+  html, body { height: 100%; background: var(--bg); font-family: 'Outfit', sans-serif; color: var(--white); overflow: hidden; }
+
+  .page { display: none; }
+  .page.active { display: flex; }
+
+  /* ─────────────────────────────────────────
+     SHARED BACKGROUND
+  ───────────────────────────────────────── */
+  .bg-grid {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image:
+      linear-gradient(rgba(99,102,241,.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(99,102,241,.06) 1px, transparent 1px);
+    background-size: 56px 56px;
+  }
+  .bg-blob { position: fixed; border-radius: 50%; filter: blur(100px); pointer-events: none; z-index: 0; }
+  .bg-blob-1 { width: 600px; height: 600px; background: rgba(99,102,241,.12); top: -200px; left: -100px; }
+  .bg-blob-2 { width: 500px; height: 500px; background: rgba(67,56,202,.10); bottom: -150px; right: -100px; }
+
+  /* ─────────────────────────────────────────
+     SHARED CLOCK FACE  (used in both pages)
+  ───────────────────────────────────────── */
+  .clock-face {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative; z-index: 1;
+  }
+
+  .clock-label {
+    font-size: clamp(10px, 1vw, 16px);
+    font-weight: 700; letter-spacing: 6px;
+    text-transform: uppercase; color: var(--indigo-400); opacity: .7;
+    margin-bottom: 1.5vh;
+  }
+
+  .clock-display {
+    display: flex; align-items: center; gap: 1vw;
+  }
+  .clock-block { display: flex; flex-direction: column; align-items: center; gap: .5vh; }
+
+  .clock-digits {
+    font-family: 'DM Mono', monospace; font-weight: 400;
+    line-height: 1; letter-spacing: -.02em; color: var(--white);
+    text-shadow: 0 0 80px rgba(99,102,241,.35), 0 0 160px rgba(99,102,241,.15);
+    transition: color .3s, text-shadow .3s; user-select: none;
+    min-width: 2ch; text-align: center;
+  }
+  .clock-digits.warn   { color: var(--gold); text-shadow: 0 0 80px rgba(245,166,35,.4), 0 0 160px rgba(245,166,35,.2); }
+  .clock-digits.danger { color: var(--red);  text-shadow: 0 0 80px rgba(239,68,68,.5),  0 0 160px rgba(239,68,68,.25); animation: pulse-danger 1s ease-in-out infinite; }
+  .clock-digits.done   { color: var(--indigo-400); animation: none; text-shadow: 0 0 80px rgba(129,140,248,.3); }
+  @keyframes pulse-danger { 0%,100%{opacity:1} 50%{opacity:.6} }
+
+  .clock-unit-label {
+    font-size: clamp(9px, .7vw, 13px); font-weight: 700;
+    letter-spacing: 4px; text-transform: uppercase; color: var(--slate-600);
+  }
+
+  .clock-sep {
+    font-family: 'DM Mono', monospace; font-weight: 300;
+    line-height: 1; color: var(--indigo-500); opacity: .5;
+    margin-bottom: 2vh; user-select: none;
+    animation: sep-blink 1s step-start infinite;
+  }
+  .clock-sep.paused  { animation: none; opacity: .2; }
+  .clock-sep.stopped { animation: none; opacity: .15; }
+  @keyframes sep-blink { 0%,49%{opacity:.5} 50%,100%{opacity:.15} }
+
+  .done-msg {
+    font-size: clamp(12px, 1vw, 18px); font-weight: 700; letter-spacing: 4px;
+    text-transform: uppercase; color: var(--indigo-400);
+    opacity: 0; margin-top: 1.5vh; transition: opacity .5s;
+  }
+  .done-msg.visible { opacity: 1; }
+
+  /* Progress ring */
+  .ring-wrap {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: none; z-index: 0;
+  }
+  .progress-ring { opacity: .08; transform: rotate(-90deg); transition: opacity .5s; }
+  .progress-ring.active { opacity: .13; }
+  .progress-ring circle { fill: none; stroke-linecap: round; }
+
+  /* Done flash overlay */
+  .done-flash { position: fixed; inset: 0; z-index: 2; pointer-events: none; }
+  .done-flash.flash { animation: flash-anim .6s ease-out; }
+  @keyframes flash-anim { 0%{background:rgba(99,102,241,0)} 20%{background:rgba(99,102,241,.18)} 100%{background:rgba(99,102,241,0)} }
+
+  /* ─────────────────────────────────────────
+     DISPLAY PAGE  (big screen)
+  ───────────────────────────────────────── */
+  #page-display {
+    height: 100vh; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  #page-display .clock-face { width: 100%; height: 100vh; }
+  #page-display .clock-label { font-size: clamp(11px,1.2vw,20px); }
+  #page-display .clock-digits { font-size: clamp(100px, 22vw, 320px); }
+  #page-display .clock-sep    { font-size: clamp(70px,  16vw, 240px); }
+  #page-display .done-msg     { font-size: clamp(14px,  1.4vw, 24px); }
+
+  .btn-to-control {
+    position: fixed; top: 20px; right: 24px; z-index: 10;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15);
+    color: rgba(255,255,255,.5); padding: 8px 18px; border-radius: 8px;
+    font-size: 13px; font-weight: 600; letter-spacing: .5px; cursor: pointer;
+    font-family: 'Outfit', sans-serif;
+  }
+  .btn-to-control:hover { background: rgba(255,255,255,.14); }
+
+  /* ─────────────────────────────────────────
+     CONTROL PAGE  (operator view)
+  ───────────────────────────────────────── */
+  #page-control {
+    height: 100vh; flex-direction: row;
+    align-items: stretch; gap: 0; overflow: hidden;
+  }
+
+  /* Left: mini clock preview */
+  .control-preview {
+    flex: 1; min-width: 0;
+    background: linear-gradient(160deg,#0f1120 0%,#131528 100%);
+    border-right: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    position: relative; overflow: hidden;
+  }
+  .control-preview .clock-face { width: 100%; padding: 2vw; }
+  .control-preview .clock-digits { font-size: clamp(52px, 9vw, 140px); }
+  .control-preview .clock-sep    { font-size: clamp(38px, 7vw, 110px); }
+  .control-preview .done-msg     { font-size: clamp(11px, .9vw, 16px); }
+  .control-preview .ring-wrap svg { width: min(40vh,40vw); height: min(40vh,40vw); }
+
+  .preview-label {
+    position: absolute; top: 18px; left: 22px;
+    font-size: 11px; font-weight: 700; letter-spacing: 3px;
+    text-transform: uppercase; color: var(--indigo-400); opacity: .5;
+  }
+  .live-dot {
+    display: inline-block; width: 6px; height: 6px;
+    border-radius: 50%; background: var(--green);
+    margin-right: 6px; vertical-align: middle;
+    animation: live-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes live-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.7)} }
+
+  /* Right: controls panel */
+  .control-panel {
+    width: 380px; flex-shrink: 0;
+    background: var(--surface);
+    display: flex; flex-direction: column;
+    padding: 28px 28px 32px;
+    gap: 0; overflow-y: auto;
+  }
+
+  .panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 28px;
+  }
+  .panel-header .logo { font-size: 18px; font-weight: 800; color: var(--indigo-300); letter-spacing: -.3px; }
+
+  .btn-open-display {
+    background: var(--indigo-500); color: #fff; border: none;
+    padding: 8px 16px; border-radius: 8px; font-weight: 700; font-size: 13px;
+    cursor: pointer; font-family: 'Outfit', sans-serif; white-space: nowrap;
+    transition: background .15s;
+  }
+  .btn-open-display:hover { background: var(--indigo-700); }
+
+  .panel-section { margin-bottom: 24px; }
+  .panel-section h3 {
+    font-size: 11px; font-weight: 800; letter-spacing: 3px;
+    text-transform: uppercase; color: var(--slate-600);
+    margin-bottom: 12px;
+  }
+
+  /* Time input */
+  .time-input-row {
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(99,102,241,.07);
+    border: 1.5px solid var(--border);
+    border-radius: 12px; padding: 12px 16px;
+  }
+  .time-field { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; }
+  .time-field input {
+    width: 100%; background: transparent; border: none; outline: none;
+    color: var(--white); font-family: 'DM Mono', monospace;
+    font-size: 36px; font-weight: 400; text-align: center;
+    -moz-appearance: textfield;
+  }
+  .time-field input::-webkit-inner-spin-button,
+  .time-field input::-webkit-outer-spin-button { -webkit-appearance: none; }
+  .time-field input:disabled { opacity: .35; cursor: not-allowed; }
+  .time-field span {
+    font-size: 10px; font-weight: 700; letter-spacing: 3px;
+    text-transform: uppercase; color: var(--slate-600);
+  }
+  .time-input-sep {
+    font-family: 'DM Mono', monospace; font-size: 36px;
+    color: var(--indigo-500); opacity: .4; padding-bottom: 16px;
+  }
+
+  /* Buttons */
+  .btn-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  }
+
+  .btn {
+    font-family: 'Outfit', sans-serif; font-weight: 800;
+    font-size: 15px; letter-spacing: .2px;
+    border: none; border-radius: 10px;
+    padding: 13px 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    transition: transform .12s, opacity .12s, box-shadow .12s;
+  }
+  .btn:hover:not(:disabled) { transform: translateY(-2px); }
+  .btn:active:not(:disabled){ transform: translateY(0); }
+  .btn:disabled { opacity: .28; cursor: not-allowed; transform: none; }
+
+  .btn-start {
+    background: linear-gradient(135deg,#312e81,var(--indigo-500));
+    color: #fff; box-shadow: 0 4px 18px rgba(99,102,241,.3);
+    grid-column: span 2;
+  }
+  .btn-start:hover:not(:disabled) { box-shadow: 0 8px 28px rgba(99,102,241,.45); }
+
+  .btn-pause {
+    background: rgba(245,166,35,.1); color: var(--gold);
+    border: 1.5px solid rgba(245,166,35,.25);
+  }
+  .btn-pause:hover:not(:disabled) { background: rgba(245,166,35,.18); }
+
+  .btn-stop {
+    background: rgba(239,68,68,.08); color: var(--red);
+    border: 1.5px solid rgba(239,68,68,.22);
+  }
+  .btn-stop:hover:not(:disabled) { background: rgba(239,68,68,.16); }
+
+  .btn-reset {
+    background: rgba(148,163,184,.07); color: var(--slate-400);
+    border: 1.5px solid rgba(148,163,184,.15);
+    grid-column: span 2;
+  }
+  .btn-reset:hover:not(:disabled) { background: rgba(148,163,184,.13); color: var(--white); }
+
+  /* Spacebar hint */
+  .shortcut-hint {
+    margin-top: 14px;
+    font-size: 11px; color: var(--slate-600); text-align: center; letter-spacing: .3px;
+  }
+  .shortcut-hint kbd {
+    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 4px; padding: 1px 6px; font-family: 'DM Mono', monospace;
+    font-size: 10px; color: var(--slate-400);
+  }
+
+  /* Status bar */
+  .status-bar {
+    margin-top: auto; padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-size: 12px; color: var(--slate-600);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .status-bar .status-text { flex: 1; }
+</style>
+</head>
+<body>
+
+<div class="bg-grid"></div>
+<div class="bg-blob bg-blob-1"></div>
+<div class="bg-blob bg-blob-2"></div>
+<div class="done-flash" id="done-flash"></div>
+
+<!-- ══════════════════════════════════════
+     DISPLAY PAGE  (#display)
+══════════════════════════════════════ -->
+<div id="page-display" class="page">
+  <button class="btn-to-control" onclick="location.hash='#control'">⚙ Bediening</button>
+
+  <div class="clock-face" id="display-face">
+    <div class="ring-wrap">
+      <svg class="progress-ring" id="disp-ring" viewBox="0 0 200 200" style="width:min(70vh,70vw);height:min(70vh,70vw)">
+        <circle cx="100" cy="100" r="94" stroke="rgba(99,102,241,.3)" stroke-width="1.5"/>
+        <circle id="disp-ring-fill" cx="100" cy="100" r="94" stroke="#6366f1" stroke-width="3"/>
+      </svg>
+    </div>
+    <div class="clock-label" id="disp-label">Countdown</div>
+    <div class="clock-display">
+      <div class="clock-block">
+        <div class="clock-digits" id="disp-min">00</div>
+        <div class="clock-unit-label">min</div>
+      </div>
+      <div class="clock-sep stopped" id="disp-sep">:</div>
+      <div class="clock-block">
+        <div class="clock-digits" id="disp-sec">00</div>
+        <div class="clock-unit-label">sec</div>
+      </div>
+    </div>
+    <div class="done-msg" id="disp-done-msg">⏱ Tijd is om!</div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     CONTROL PAGE  (#control / default)
+══════════════════════════════════════ -->
+<div id="page-control" class="page">
+
+  <!-- Mini preview (left) -->
+  <div class="control-preview">
+    <div class="preview-label"><span class="live-dot"></span>Live preview</div>
+    <div class="clock-face">
+      <div class="ring-wrap">
+        <svg class="progress-ring" id="ctrl-ring" viewBox="0 0 200 200" style="width:min(40vh,38vw);height:min(40vh,38vw)">
+          <circle cx="100" cy="100" r="94" stroke="rgba(99,102,241,.3)" stroke-width="1.5"/>
+          <circle id="ctrl-ring-fill" cx="100" cy="100" r="94" stroke="#6366f1" stroke-width="3"/>
+        </svg>
+      </div>
+      <div class="clock-label" id="ctrl-label">Countdown</div>
+      <div class="clock-display">
+        <div class="clock-block">
+          <div class="clock-digits" id="ctrl-min">00</div>
+          <div class="clock-unit-label">min</div>
+        </div>
+        <div class="clock-sep stopped" id="ctrl-sep">:</div>
+        <div class="clock-block">
+          <div class="clock-digits" id="ctrl-sec">00</div>
+          <div class="clock-unit-label">sec</div>
+        </div>
+      </div>
+      <div class="done-msg" id="ctrl-done-msg">⏱ Tijd is om!</div>
+    </div>
+  </div>
+
+  <!-- Control panel (right) -->
+  <div class="control-panel">
+    <div class="panel-header">
+      <div class="logo">⏱ Countdown</div>
+      <button class="btn-open-display" onclick="openDisplay()">📺 Open klok</button>
+    </div>
+
+    <div class="panel-section">
+      <h3>Tijd instellen</h3>
+      <div class="time-input-row">
+        <div class="time-field">
+          <input type="number" id="inp-min" value="5" min="0" max="99" oninput="livePreview()" onblur="clampInputs()"/>
+          <span>minuten</span>
+        </div>
+        <div class="time-input-sep">:</div>
+        <div class="time-field">
+          <input type="number" id="inp-sec" value="0" min="0" max="59" oninput="livePreview()" onblur="clampInputs()"/>
+          <span>seconden</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <h3>Bediening</h3>
+      <div class="btn-grid">
+        <button class="btn btn-start" id="btn-start" onclick="startTimer()">▶ Start</button>
+        <button class="btn btn-pause" id="btn-pause" onclick="pauseTimer()" disabled>⏸ Pauze</button>
+        <button class="btn btn-stop"  id="btn-stop"  onclick="stopTimer()"  disabled>⏹ Stop</button>
+        <button class="btn btn-reset" id="btn-reset" onclick="resetTimer()">↺ Reset</button>
+      </div>
+      <div class="shortcut-hint">
+        <kbd>spatie</kbd> start / pauze &nbsp;·&nbsp; <kbd>R</kbd> reset
+      </div>
+    </div>
+
+    <div class="status-bar">
+      <span class="live-dot" id="sync-dot" style="background:var(--slate-600)"></span>
+      <span class="status-text" id="status-text">Klaar om te starten</span>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ══════════════════════════════════════════════════
+// SYNC via BroadcastChannel + localStorage
+// ══════════════════════════════════════════════════
+const STORAGE_KEY = 'countdown_state_v1';
+const BC_CHANNEL  = 'countdown_sync';
+let bc;
+try { bc = new BroadcastChannel(BC_CHANNEL); } catch(e) {}
+
+function broadcast(timerState) {
+  const payload = { type: 'state', ...timerState };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  if (bc) bc.postMessage(payload);
+}
+
+if (bc) {
+  bc.onmessage = (e) => {
+    if (e.data?.type === 'state') applyRemoteState(e.data);
+  };
+}
+window.addEventListener('storage', (e) => {
+  if (e.key === STORAGE_KEY && e.newValue) {
+    try { applyRemoteState(JSON.parse(e.newValue)); } catch(_) {}
+  }
+});
+
+// ══════════════════════════════════════════════════
+// TIMER STATE
+// ══════════════════════════════════════════════════
+let totalSeconds = 0;
+let remaining    = 0;
+let running      = false;
+let paused       = false;
+let intervalId   = null;
+
+// Ring constants
+const R       = 94;
+const CIRCUMF = 2 * Math.PI * R;
+
+// Elements — display page
+const dispMin     = document.getElementById('disp-min');
+const dispSec     = document.getElementById('disp-sec');
+const dispSep     = document.getElementById('disp-sep');
+const dispLabel   = document.getElementById('disp-label');
+const dispDoneMsg = document.getElementById('disp-done-msg');
+const dispRing    = document.getElementById('disp-ring');
+const dispFill    = document.getElementById('disp-ring-fill');
+
+// Elements — control page preview
+const ctrlMin     = document.getElementById('ctrl-min');
+const ctrlSec     = document.getElementById('ctrl-sec');
+const ctrlSep     = document.getElementById('ctrl-sep');
+const ctrlLabel   = document.getElementById('ctrl-label');
+const ctrlDoneMsg = document.getElementById('ctrl-done-msg');
+const ctrlRing    = document.getElementById('ctrl-ring');
+const ctrlFill    = document.getElementById('ctrl-ring-fill');
+
+// Inputs + buttons
+const inpMin    = document.getElementById('inp-min');
+const inpSec    = document.getElementById('inp-sec');
+const btnStart  = document.getElementById('btn-start');
+const btnPause  = document.getElementById('btn-pause');
+const btnStop   = document.getElementById('btn-stop');
+const doneFlash = document.getElementById('done-flash');
+const statusDot = document.getElementById('sync-dot');
+const statusTxt = document.getElementById('status-text');
+
+// Init ring stroke
+[dispFill, ctrlFill].forEach(f => {
+  f.style.strokeDasharray  = CIRCUMF;
+  f.style.strokeDashoffset = CIRCUMF;
+});
+
+// ══════════════════════════════════════════════════
+// DISPLAY HELPERS
+// ══════════════════════════════════════════════════
+function pad(n) { return String(Math.max(0, n)).padStart(2, '0'); }
+
+function updateFaces(secs, sepClass, labelText, showDone) {
+  const m   = Math.floor(secs / 60);
+  const s   = secs % 60;
+  const cls = secs <= 0 ? 'done' : secs <= 5 ? 'danger' : secs <= 10 ? 'warn' : '';
+  const digitClass = 'clock-digits' + (cls ? ' ' + cls : '');
+
+  // Both faces get the same values
+  dispMin.textContent = ctrlMin.textContent = pad(m);
+  dispSec.textContent = ctrlSec.textContent = pad(s);
+  dispMin.className   = ctrlMin.className   = digitClass;
+  dispSec.className   = ctrlSec.className   = digitClass;
+  dispSep.className   = ctrlSep.className   = 'clock-sep ' + sepClass;
+  dispLabel.textContent = ctrlLabel.textContent = labelText;
+  dispDoneMsg.classList.toggle('visible', showDone);
+  ctrlDoneMsg.classList.toggle('visible', showDone);
+
+  // Ring
+  const pct    = totalSeconds > 0 ? secs / totalSeconds : 0;
+  const offset = CIRCUMF * (1 - pct);
+  const stroke = secs <= 5 ? '#ef4444' : secs <= 10 ? '#f5a623' : '#6366f1';
+  [dispFill, ctrlFill].forEach(f => {
+    f.style.strokeDashoffset = offset;
+    f.style.stroke = stroke;
+  });
+  const ringActive = running && !paused && secs > 0;
+  dispRing.classList.toggle('active', ringActive);
+  ctrlRing.classList.toggle('active', ringActive);
+}
+
+function syncButtonStates() {
+  btnStart.disabled = running && !paused;
+  btnPause.disabled = !running || paused;
+  btnStop.disabled  = !running;
+  btnStart.textContent = paused ? '▶ Hervat' : '▶ Start';
+
+  // Status bar
+  const dot = running && !paused ? '#10b981' : paused ? '#f5a623' : '#475569';
+  statusDot.style.background = dot;
+  statusTxt.textContent =
+    remaining <= 0 && !running ? 'Tijd is om!' :
+    running && !paused         ? `Loopt — ${pad(Math.floor(remaining/60))}:${pad(remaining%60)} resterend` :
+    paused                     ? `Gepauzeerd op ${pad(Math.floor(remaining/60))}:${pad(remaining%60)}` :
+                                 'Klaar om te starten';
+}
+
+function setInputsDisabled(d) {
+  inpMin.disabled = d;
+  inpSec.disabled = d;
+}
+
+// ══════════════════════════════════════════════════
+// TIMER CONTROLS
+// ══════════════════════════════════════════════════
+function startTimer() {
+  dispDoneMsg.classList.remove('visible');
+  ctrlDoneMsg.classList.remove('visible');
+
+  if (paused) {
+    paused = false; running = true;
+    intervalId = setInterval(tick, 1000);
+    updateFaces(remaining, '', 'Countdown', false);
+    syncButtonStates();
+    broadcast({ remaining, totalSeconds, running, paused });
+    return;
+  }
+
+  const m = Math.max(0, parseInt(inpMin.value) || 0);
+  const s = Math.max(0, Math.min(59, parseInt(inpSec.value) || 0));
+  totalSeconds = m * 60 + s;
+  if (totalSeconds <= 0) return;
+
+  remaining = totalSeconds;
+  running   = true; paused = false;
+  setInputsDisabled(true);
+
+  clearInterval(intervalId);
+  intervalId = setInterval(tick, 1000);
+  updateFaces(remaining, '', 'Countdown', false);
+  syncButtonStates();
+  broadcast({ remaining, totalSeconds, running, paused });
+}
+
+function tick() {
+  remaining--;
+  const sepCls = '';
+  const done   = remaining <= 0;
+  updateFaces(remaining, done ? 'stopped' : sepCls, done ? 'Klaar!' : 'Countdown', done);
+  syncButtonStates();
+  broadcast({ remaining, totalSeconds, running: !done, paused: false });
+
+  if (done) {
+    clearInterval(intervalId);
+    running = false; paused = false;
+    setInputsDisabled(false);
+    doneFlash.classList.remove('flash');
+    void doneFlash.offsetWidth;
+    doneFlash.classList.add('flash');
+  }
+}
+
+function pauseTimer() {
+  if (!running || paused) return;
+  clearInterval(intervalId);
+  paused = true;
+  updateFaces(remaining, 'paused', 'Countdown', false);
+  syncButtonStates();
+  broadcast({ remaining, totalSeconds, running, paused });
+}
+
+function stopTimer() {
+  clearInterval(intervalId);
+  running = false; paused = false;
+  setInputsDisabled(false);
+  updateFaces(remaining, 'stopped', 'Countdown', false);
+  syncButtonStates();
+  broadcast({ remaining, totalSeconds, running, paused });
+}
+
+function resetTimer() {
+  clearInterval(intervalId);
+  running = false; paused = false;
+  const m = Math.max(0, parseInt(inpMin.value) || 0);
+  const s = Math.max(0, Math.min(59, parseInt(inpSec.value) || 0));
+  totalSeconds = m * 60 + s;
+  remaining    = totalSeconds;
+  setInputsDisabled(false);
+  updateFaces(remaining, 'stopped', 'Countdown', false);
+  [dispFill, ctrlFill].forEach(f => f.style.strokeDashoffset = CIRCUMF);
+  syncButtonStates();
+  broadcast({ remaining, totalSeconds, running, paused });
+}
+
+function livePreview() {
+  if (running) return;
+  const m = Math.max(0, parseInt(inpMin.value) || 0);
+  const s = Math.max(0, Math.min(59, parseInt(inpSec.value) || 0));
+  totalSeconds = m * 60 + s;
+  remaining    = totalSeconds;
+  updateFaces(remaining, 'stopped', 'Countdown', false);
+  [dispFill, ctrlFill].forEach(f => f.style.strokeDashoffset = CIRCUMF);
+  broadcast({ remaining, totalSeconds, running, paused });
+}
+
+function clampInputs() {
+  let v = parseInt(inpSec.value) || 0;
+  if (v > 59) inpSec.value = 59;
+  if (v < 0)  inpSec.value = 0;
+  livePreview();
+}
+
+// ── Apply state from another tab (display page) ──
+function applyRemoteState(data) {
+  remaining    = data.remaining    ?? remaining;
+  totalSeconds = data.totalSeconds ?? totalSeconds;
+  running      = data.running      ?? running;
+  paused       = data.paused       ?? paused;
+
+  const sepCls = paused ? 'paused' : !running ? 'stopped' : '';
+  const done   = remaining <= 0 && !running;
+  updateFaces(remaining, sepCls, done ? 'Klaar!' : 'Countdown', done);
+  // Don't touch buttons/inputs on display page — only control page cares
+  if (currentPage() === 'control') syncButtonStates();
+}
+
+// ══════════════════════════════════════════════════
+// ROUTING
+// ══════════════════════════════════════════════════
+function currentPage() { return location.hash === '#display' ? 'display' : 'control'; }
+
+function showPage(name) {
+  document.getElementById('page-display').classList.toggle('active', name === 'display');
+  document.getElementById('page-control').classList.toggle('active', name === 'control');
+}
+
+function openDisplay() {
+  window.open(location.href.split('#')[0] + '#display', '_blank');
+}
+
+window.addEventListener('hashchange', () => showPage(currentPage()));
+
+// ══════════════════════════════════════════════════
+// KEYBOARD
+// ══════════════════════════════════════════════════
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (running && !paused) pauseTimer();
+    else startTimer();
+  }
+  if (e.code === 'KeyR') resetTimer();
+});
+
+// ══════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════
+
+// Try to load last state from storage (for display page reconnect)
+try {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) {
+    const d = JSON.parse(saved);
+    totalSeconds = d.totalSeconds ?? 0;
+    remaining    = d.remaining    ?? 0;
+    running      = false; // never auto-resume on load
+    paused       = false;
+    // Sync input fields
+    inpMin.value = Math.floor(totalSeconds / 60);
+    inpSec.value = totalSeconds % 60;
+  }
+} catch(_) {}
+
+updateFaces(remaining, 'stopped', 'Countdown', remaining <= 0 && totalSeconds > 0 ? true : false);
+syncButtonStates();
+showPage(currentPage());
+</script>
+</body>
+</html>
